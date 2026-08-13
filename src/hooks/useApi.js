@@ -184,17 +184,21 @@ export function useApi() {
     signal,
     onToken,
   }) => {
+    const temp = Number(temperature)
+    const body = {
+      model,
+      messages,
+      stream: true,
+    }
+    if (Number.isFinite(temp) && temp >= 0 && temp <= 2) {
+      body.temperature = temp
+    }
     const response = await apiFetch(
       `${cleanApiUrl(apiUrl)}/v1/chat/completions`,
       {
         method: 'POST',
         headers: requestHeaders(apiKey, { 'Content-Type': 'application/json' }),
-        body: JSON.stringify({
-          model,
-          messages,
-          stream: true,
-          temperature: Number(temperature),
-        }),
+        body: JSON.stringify(body),
         signal,
       },
       300000,

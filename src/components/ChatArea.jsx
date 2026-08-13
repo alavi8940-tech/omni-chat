@@ -1,6 +1,15 @@
 import { useEffect, useRef, useState } from 'react'
-import { Bot, ChevronDown, Image, Mic2, Send, Sparkles, Video } from 'lucide-react'
-import { useApp } from '../contexts/AppContext'
+import {
+  Bot,
+  ChevronDown,
+  Image,
+  Mic2,
+  Send,
+  Sparkles,
+  Square,
+  Video,
+} from 'lucide-react'
+import { detectTextDirection, makeId, useApp } from '../contexts/AppContext'
 import { useApi } from '../hooks/useApi'
 import Message from './Message'
 import ModelSelector from './ModelSelector'
@@ -20,37 +29,60 @@ function ChatArea() {
     updateChat,
     addMessage,
     updateMessage,
+    deleteMessage,
     models,
     setModels,
     setView,
+    storageWarning,
+    setStorageWarning,
   } = useApp()
   const api = useApi()
   const [prompt, setPrompt] = useState('')
   const [busy, setBusy] = useState(false)
+  const [loadingModels, setLoadingModels] = useState(false)
   const [modelOpen, setModelOpen] = useState(false)
   const [modelError, setModelError] = useState('')
+  const [stickToBottom, setStickToBottom] = useState(true)
+  const abortRef = useRef(null)
   const endRef = useRef(null)
+  const textareaRef = useRef(null)
 
   const mode = activeChat?.modelType || 'text'
   const meta = modeMeta[mode]
   const ModeIcon = meta.icon
 
   useEffect(() => {
-    endRef.current?.scrollIntoView({ behavior: 'smooth' })
-  }, [activeChat?.messages])
+    if (stickToBottom) endRef.current?.scrollIntoView({ behavior: busy ? 'auto' : 'smooth' })
+  }, [activeChat?.messages, busy, stickToBottom])
 
-  const loadModels = async () => {
+  useEffect(() => () => abortRef.current?.abort(), [])
+
+  useEffect(() => {
+    const textarea = textareaRef.current
+    if (!textarea) return
+    textarea.style.height = 'auto'
+    textarea.style.height = `${Math.min(textarea.scrollHeight, 130)}px`
+  }, [prompt])
+
+  const loadModels = async (force = false) => {
     setModelError('')
-    if (!settings.apiUrl || !settings.apiKey) {
+    if (!settings.apiUrl) {
       setView('settings')
       return
     }
+    if (models.length && !force) {
+      setModelOpen(true)
+      return
+    }
+    setLoadingModels(true)
     try {
       const found = await api.fetchModels(settings.apiUrl, settings.apiKey)
       setModels(found)
       setModelOpen(true)
     } catch (error) {
       setModelError(error.message)
+    } finally {
+      setLoadingModels(false)
     }
   }
 
@@ -62,11 +94,88 @@ function ChatArea() {
     updateChat(activeChat.id, { model, modelType })
   }
 
+  const runRequest = async (content, sourceChat = activeChat, { appendUser = true } = {}) => {
+    if (!content || busy || !sourceChat?.model) return
+    const chatId = sourceChat.id
+    const modeAtStart = sourceChat.modelType || 'text'
+    const userMessage = { id: makeId(), role: 'user', content, createdAt: Date.now() }
+    const assistantId = makeId()
+    const assistantMessage = {
+      id: assistantId,
+      role: 'assistant',
+      content: '',
+      status: 'loading',
+      mediaType: modeAtStart === 'text' ? null : modeAtStart,
+      prompt: content,
+      createdAt: Date.now(),
+    }
+    const previous = sourceChat.messages.filter((message) => message.status !== 'error')
+    const history = [...previous, ...(appendUser ? [userMessage] : [])]
+      .filter((message) => message.content && !message.mediaType)
+      .map(({ role, content: messageContent }) => ({ role, content: messageContent }))
+    const systemPrompt = String(settings.systemPrompt || '').trim()
+    if (systemPrompt) {
+      history.unshift({ role: 'system', content: systemPrompt })
+    }
+
+    const controller = new AbortController()
+    abortRef.current = controller
+    setPrompt('')
+    setBusy(true)
+    setStickToBottom(true)
+    if (appendUser) addMessage(chatId, userMessage)
+    addMessage(chatId, assistantMessage)
+
+    try {
+      if (modeAtStart === 'text') {
+        let fullText = ''
+        let frame = 0
+        const flushText = () => {
+          frame = 0
+          updateMessage(chatId, assistantId, { content: fullText })
+        }
+        await api.streamChat({
+          ...settings,
+          model: sourceChat.model,
+          messages: history,
+          signal: controller.signal,
+          onToken: (token) => {
+            fullText += token
+            if (!frame) frame = window.requestAnimationFrame(flushText)
+          },
+        })
+        if (frame) window.cancelAnimationFrame(frame)
+        updateMessage(chatId, assistantId, { content: fullText, status: 'done' })
+      } else {
+        const method = {
+          image: api.generateImage,
+          audio: api.generateAudio,
+          video: api.generateVideo,
+        }[modeAtStart]
+        const url = await method({
+          ...settings,
+          model: sourceChat.model,
+          prompt: content,
+          signal: controller.signal,
+        })
+        updateMessage(chatId, assistantId, { url, status: 'done' })
+      }
+    } catch (error) {
+      updateMessage(chatId, assistantId, {
+        status: controller.signal.aborted ? 'cancelled' : 'error',
+        error: controller.signal.aborted ? 'Generation stopped.' : error.message,
+      })
+    } finally {
+      abortRef.current = null
+      setBusy(false)
+    }
+  }
+
   const submit = async (event) => {
     event.preventDefault()
     const content = prompt.trim()
     if (!content || busy) return
-    if (!settings.apiUrl || !settings.apiKey) {
+    if (!settings.apiUrl) {
       setView('settings')
       return
     }
@@ -74,55 +183,17 @@ function ChatArea() {
       await loadModels()
       return
     }
-
-    const chatId = activeChat.id
-    const userMessage = { id: crypto.randomUUID(), role: 'user', content }
-    const assistantId = crypto.randomUUID()
-    const assistantMessage = {
-      id: assistantId,
-      role: 'assistant',
-      content: '',
-      status: 'loading',
-      mediaType: mode === 'text' ? null : mode,
-      prompt: content,
-    }
-    const history = [...activeChat.messages, userMessage]
-      .filter((message) => message.content && !message.mediaType)
-      .map(({ role, content: messageContent }) => ({ role, content: messageContent }))
-
-    setPrompt('')
-    setBusy(true)
-    addMessage(chatId, userMessage)
-    addMessage(chatId, assistantMessage)
-
-    try {
-      if (mode === 'text') {
-        let fullText = ''
-        await api.streamChat({
-          ...settings,
-          model: activeChat.model,
-          messages: history,
-          onToken: (token) => {
-            fullText += token
-            updateMessage(chatId, assistantId, { content: fullText })
-          },
-        })
-        updateMessage(chatId, assistantId, { content: fullText, status: 'done' })
-      } else {
-        const method = {
-          image: api.generateImage,
-          audio: api.generateAudio,
-          video: api.generateVideo,
-        }[mode]
-        const url = await method({ ...settings, model: activeChat.model, prompt: content })
-        updateMessage(chatId, assistantId, { url, status: 'done' })
-      }
-    } catch (error) {
-      updateMessage(chatId, assistantId, { status: 'error', error: error.message })
-    } finally {
-      setBusy(false)
-    }
+    await runRequest(content)
   }
+
+  const retryMessage = (message) => {
+    const promptToRetry = message.prompt
+    if (!promptToRetry || !activeChat) return
+    deleteMessage(activeChat.id, message.id)
+    runRequest(promptToRetry, activeChat, { appendUser: false })
+  }
+
+  const stopGeneration = () => abortRef.current?.abort()
 
   return (
     <section className="chat-page">
@@ -134,34 +205,79 @@ function ChatArea() {
             <span>{meta.label} mode</span>
           </div>
         </div>
-        <button className="model-trigger" type="button" onClick={loadModels}>
-          <ModeIcon size={17} />
-          <span>{activeChat?.model || 'Select model'}</span>
-          <ChevronDown size={16} />
-        </button>
+        <div className="header-controls">
+          <label className="mode-select-wrap" title="Override detected model type">
+            <ModeIcon size={15} />
+            <select
+              aria-label="Chat mode"
+              value={mode}
+              onChange={(event) => {
+                const modelType = event.target.value
+                if (activeChat?.id) updateChat(activeChat.id, { modelType })
+                else createChat({ modelType })
+              }}
+            >
+              {Object.entries(modeMeta).map(([key, item]) => (
+                <option key={key} value={key}>{item.label}</option>
+              ))}
+            </select>
+          </label>
+          <button className="model-trigger" type="button" onClick={() => loadModels()} disabled={loadingModels}>
+            <span>{loadingModels ? 'Loading models...' : activeChat?.model || 'Select model'}</span>
+            <ChevronDown size={16} />
+          </button>
+        </div>
       </header>
 
-      {modelError && (
-        <button className="connection-error" type="button" onClick={() => setView('settings')}>
-          {modelError} · Open settings
-        </button>
+      {(modelError || storageWarning) && (
+        <div className="notice-stack">
+          {modelError && (
+            <button className="connection-error" type="button" onClick={() => setView('settings')}>
+              {modelError} · Open settings
+            </button>
+          )}
+          {storageWarning && (
+            <button className="storage-warning" type="button" onClick={() => setStorageWarning('')}>
+              {storageWarning} · Dismiss
+            </button>
+          )}
+        </div>
       )}
 
-      <div className="messages">
+      <div
+        className="messages"
+        onScroll={(event) => {
+          const element = event.currentTarget
+          setStickToBottom(element.scrollHeight - element.scrollTop - element.clientHeight < 100)
+        }}
+      >
         {!activeChat || activeChat.messages.length === 0 ? (
           <div className="welcome">
             <div className="welcome-icon"><Sparkles size={29} /></div>
             <span className="eyebrow">WELCOME TO OMNICHAT</span>
-            <h2>What will you create?</h2>
-            <p>Connect your OpenAI-compatible API, choose any model, and start a conversation.</p>
+            <h2>One app. Every medium.</h2>
+            <p>Chat, illustrate, narrate, and create video through any OpenAI-compatible provider.</p>
+            <div className="mode-pills" aria-label="Supported modes">
+              {Object.entries(modeMeta).map(([key, item]) => {
+                const Icon = item.icon
+                return <span key={key}><Icon size={13} />{item.label}</span>
+              })}
+            </div>
             {!activeChat?.model && (
-              <button className="primary-button" type="button" onClick={loadModels}>
+              <button className="primary-button" type="button" onClick={() => loadModels()}>
                 Choose your model
               </button>
             )}
           </div>
         ) : (
-          activeChat.messages.map((message) => <Message message={message} key={message.id} />)
+          activeChat.messages.map((message) => (
+            <Message
+              message={message}
+              key={message.id}
+              onRetry={!busy && message.status === 'error' ? () => retryMessage(message) : null}
+              onDelete={!busy ? () => deleteMessage(activeChat.id, message.id) : null}
+            />
+          ))
         )}
         <div ref={endRef} />
       </div>
@@ -169,11 +285,13 @@ function ChatArea() {
       <form className="composer-wrap" onSubmit={submit}>
         <div className="composer">
           <textarea
+            ref={textareaRef}
             rows="1"
             value={prompt}
+            dir={detectTextDirection(prompt)}
             onChange={(event) => setPrompt(event.target.value)}
             onKeyDown={(event) => {
-              if (event.key === 'Enter' && !event.shiftKey) {
+              if (event.key === 'Enter' && !event.shiftKey && !event.nativeEvent.isComposing) {
                 event.preventDefault()
                 event.currentTarget.form?.requestSubmit()
               }
@@ -181,11 +299,17 @@ function ChatArea() {
             placeholder={meta.placeholder}
             aria-label="Message"
           />
-          <button className="send-button" type="submit" disabled={!prompt.trim() || busy} aria-label="Send">
-            <Send size={18} />
-          </button>
+          {busy ? (
+            <button className="send-button stop-button" type="button" onClick={stopGeneration} aria-label="Stop generation">
+              <Square size={15} fill="currentColor" />
+            </button>
+          ) : (
+            <button className="send-button" type="submit" disabled={!prompt.trim()} aria-label="Send">
+              <Send size={18} />
+            </button>
+          )}
         </div>
-        <p>AI can make mistakes. Check important information.</p>
+        <p>Enter to send · Shift + Enter for a new line</p>
       </form>
 
       {modelOpen && (
@@ -193,6 +317,11 @@ function ChatArea() {
           models={models}
           selected={activeChat?.model}
           onSelect={selectModel}
+          onRefresh={() => {
+            setModels([])
+            setModelOpen(false)
+            window.setTimeout(() => loadModels(true), 0)
+          }}
           onClose={() => setModelOpen(false)}
         />
       )}

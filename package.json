@@ -2,13 +2,18 @@
   "name": "omnichat",
   "private": true,
   "version": "1.0.0",
+  "description": "A mobile-first, local-first multimodal client for OpenAI-compatible APIs.",
   "type": "module",
+  "engines": {
+    "node": ">=22"
+  },
   "scripts": {
     "dev": "vite",
     "build": "vite build",
+    "build:android": "vite build --base ./",
     "preview": "vite preview",
     "android:add": "cap add android",
-    "android:sync": "npm run build && cap sync android",
+    "android:sync": "npm run build:android && cap sync android",
     "android:open": "cap open android"
   },
   "dependencies": {

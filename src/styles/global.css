@@ -456,6 +456,8 @@ button {
   padding-bottom: calc(12px + var(--safe-bottom));
   border-top: 1px solid var(--border);
   background: var(--bg-secondary);
+  flex-shrink: 0;
+  min-height: 60px;
 }
 
 .input-wrapper {
@@ -919,4 +921,24 @@ button {
 [dir="rtl"] .sidebar {
   border-right: none;
   border-left: 1px solid var(--border);
+}
+
+/* Spinning animation */
+.spinning {
+  animation: spin 1s linear infinite;
+}
+
+@keyframes spin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+
+/* Ensure textarea has color */
+.input-wrapper textarea {
+  color: var(--text-primary);
+}
+
+/* Fix for Capacitor/WebView */
+.capacitor-ios .input-area {
+  padding-bottom: calc(12px + 20px);
 }

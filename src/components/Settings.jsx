@@ -9,6 +9,7 @@ export default function Settings() {
   const [apiUrl, setApiUrl] = useState(state.settings.apiUrl)
   const [apiKey, setApiKey] = useState(state.settings.apiKey)
   const [testing, setTesting] = useState(false)
+  const [modelCount, setModelCount] = useState(0)
 
   useEffect(() => {
     setApiUrl(state.settings.apiUrl)
@@ -22,8 +23,10 @@ export default function Settings() {
 
   async function testConnection() {
     setTesting(true)
+    setModelCount(0)
     dispatch({ type: 'SET_SETTINGS', payload: { apiUrl: apiUrl.trim(), apiKey: apiKey.trim() } })
-    await fetchModels()
+    const models = await fetchModels(apiUrl.trim(), apiKey.trim())
+    if (models) setModelCount(models.length)
     setTesting(false)
   }
 
@@ -44,11 +47,11 @@ export default function Settings() {
             <label>API Base URL</label>
             <input
               type="url"
-              placeholder="https://api.example.com"
+              placeholder="https://api.openai.com"
               value={apiUrl}
               onChange={e => setApiUrl(e.target.value)}
             />
-            <div className="hint">OpenAI-compatible base URL (e.g., https://api.openai.com)</div>
+            <div className="hint">OpenAI-compatible base URL (without /v1)</div>
           </div>
           <div className="settings-field">
             <label>API Key</label>
@@ -67,7 +70,7 @@ export default function Settings() {
           <div style={{ display: 'flex', gap: '8px', alignItems: 'center', marginBottom: 16 }}>
             <div className={`status-dot ${state.connected ? 'connected' : 'disconnected'}`} />
             <span style={{ fontSize: 13, color: state.connected ? 'var(--success)' : 'var(--error)' }}>
-              {state.connected ? 'Connected' : 'Disconnected'}
+              {state.connected ? `Connected (${modelCount} models)` : 'Disconnected'}
             </span>
           </div>
           <button

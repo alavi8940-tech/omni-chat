@@ -1,0 +1,13 @@
+{
+  "appId": "com.omnichat.app",
+  "appName": "OmniChat",
+  "webDir": "dist",
+  "server": {
+    "androidScheme": "https",
+    "allowNavigation": ["*"]
+  },
+  "android": {
+    "allowMixedContent": true,
+    "webContentsDebuggingEnabled": true
+  }
+}

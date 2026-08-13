@@ -1,4 +1,4 @@
-name: Build OmniChat
+name: Build OmniChat APK
 
 on:
   push:
@@ -11,7 +11,7 @@ permissions:
   contents: write
 
 jobs:
-  build:
+  build-apk:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
@@ -22,20 +22,54 @@ jobs:
         with:
           node-version: '22'
 
+      - name: Setup Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '17'
+
+      - name: Setup Android SDK
+        uses: android-actions/setup-android@v3
+
       - name: Install dependencies
         run: npm install
 
-      - name: Build
+      - name: Build web app
         run: npm run build
 
-      - name: Upload artifact
+      - name: Init Capacitor
+        run: |
+          npx cap init OmniChat com.omnichat.app --web-dir dist
+
+      - name: Add Android platform
+        run: npx cap add android
+
+      - name: Copy web to Android
+        run: npx cap copy android
+
+      - name: Update Android project
+        run: npx cap update android
+
+      - name: Make Gradle executable
+        run: chmod +x android/gradlew
+
+      - name: Build APK
+        run: cd android && ./gradlew assembleDebug
+
+      - name: Upload APK artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: omnichat-apk
+          path: android/app/build/outputs/apk/debug/app-debug.apk
+
+      - name: Upload web artifact
         uses: actions/upload-artifact@v4
         with:
           name: omnichat-dist
           path: dist/
 
   deploy:
-    needs: build
+    needs: build-apk
     runs-on: ubuntu-latest
     if: github.ref == 'refs/heads/main' && github.event_name == 'push'
     permissions:
@@ -45,7 +79,7 @@ jobs:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}
     steps:
-      - name: Download artifact
+      - name: Download web artifact
         uses: actions/download-artifact@v4
         with:
           name: omnichat-dist

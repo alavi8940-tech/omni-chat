@@ -6,19 +6,28 @@
   "scripts": {
     "dev": "vite",
     "build": "vite build",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "cap:init": "cap init OmniChat com.omnichat.app --web-dir dist",
+    "cap:add": "cap add android",
+    "cap:copy": "cap copy android",
+    "cap:build": "cd android && ./gradlew assembleDebug"
   },
   "dependencies": {
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
     "react-markdown": "^9.0.0",
     "react-syntax-highlighter": "^15.6.0",
-    "lucide-react": "^0.460.0"
+    "lucide-react": "^0.460.0",
+    "@capacitor/core": "^6.0.0",
+    "@capacitor/app": "^6.0.0",
+    "@capacitor/status-bar": "^6.0.0",
+    "@capacitor/splash-screen": "^6.0.0"
   },
   "devDependencies": {
     "@types/react": "^19.0.0",
     "@types/react-dom": "^19.0.0",
     "@vitejs/plugin-react": "^4.3.0",
-    "vite": "^6.0.0"
+    "vite": "^6.0.0",
+    "@capacitor/cli": "^6.0.0"
   }
 }

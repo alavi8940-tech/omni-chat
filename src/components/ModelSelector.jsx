@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
-import { Check, RefreshCw, Search, X } from 'lucide-react'
-import { detectModelType } from '../contexts/AppContext'
+import { Check, RefreshCw, Search, Star, X } from 'lucide-react'
+import { useApp } from '../contexts/AppContext'
+import { detectModelType, filterModels } from '../utils/model'
 
 const labels = {
   all: 'All',
@@ -11,8 +12,10 @@ const labels = {
 }
 
 function ModelSelector({ models, selected, onSelect, onRefresh, onClose }) {
+  const { favoriteModels, toggleFavoriteModel } = useApp()
   const [query, setQuery] = useState('')
   const [filter, setFilter] = useState('all')
+  const [manualModel, setManualModel] = useState('')
   const counts = useMemo(
     () =>
       models.reduce(
@@ -25,13 +28,10 @@ function ModelSelector({ models, selected, onSelect, onRefresh, onClose }) {
       ),
     [models],
   )
-  const filtered = useMemo(() => {
-    const normalizedQuery = query.trim().toLowerCase()
-    return models.filter((model) => {
-      const matchesType = filter === 'all' || detectModelType(model.id) === filter
-      return matchesType && model.id.toLowerCase().includes(normalizedQuery)
-    })
-  }, [models, query, filter])
+  const filtered = useMemo(
+    () => filterModels(models, query, filter, favoriteModels),
+    [models, query, filter, favoriteModels],
+  )
 
   useEffect(() => {
     const closeOnEscape = (event) => {
@@ -92,26 +92,51 @@ function ModelSelector({ models, selected, onSelect, onRefresh, onClose }) {
           {filtered.map((model) => {
             const type = detectModelType(model.id)
             return (
-              <button
+              <div
                 className={`model-option ${selected === model.id ? 'selected' : ''}`}
-                type="button"
                 key={model.id}
-                onClick={() => {
-                  onSelect(model.id, type)
-                  onClose()
-                }}
               >
-                <span className={`type-icon ${type}`}>{labels[type][0]}</span>
-                <span className="model-name">
-                  <strong>{model.id}</strong>
-                  <small>{labels[type]} model</small>
-                </span>
-                {selected === model.id && <Check size={18} />}
-              </button>
+                <button
+                  className="model-select-button"
+                  type="button"
+                  onClick={() => {
+                    onSelect(model.id, type)
+                    onClose()
+                  }}
+                >
+                  <span className={`type-icon ${type}`}>{labels[type][0]}</span>
+                  <span className="model-name">
+                    <strong>{model.id}</strong>
+                    <small>{labels[type]} model</small>
+                  </span>
+                  {selected === model.id && <Check size={18} />}
+                </button>
+                <button
+                  type="button"
+                  className={`favorite-model ${favoriteModels.includes(model.id) ? 'active' : ''}`}
+                  onClick={() => toggleFavoriteModel(model.id)}
+                  aria-label={`${favoriteModels.includes(model.id) ? 'Remove' : 'Add'} ${model.id} ${favoriteModels.includes(model.id) ? 'from' : 'to'} favorites`}
+                >
+                  <Star size={15} fill={favoriteModels.includes(model.id) ? 'currentColor' : 'none'} />
+                </button>
+              </div>
             )
           })}
           {filtered.length === 0 && <p className="modal-empty">No matching models found.</p>}
         </div>
+        <form
+          className="manual-model-form"
+          onSubmit={(event) => {
+            event.preventDefault()
+            const model = manualModel.trim()
+            if (!model) return
+            onSelect(model, detectModelType(model))
+            onClose()
+          }}
+        >
+          <input value={manualModel} onChange={(event) => setManualModel(event.target.value)} placeholder="Or enter a model ID manually" />
+          <button type="submit" disabled={!manualModel.trim()}>Use model</button>
+        </form>
       </section>
     </div>
   )

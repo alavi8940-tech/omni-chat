@@ -11,6 +11,7 @@
     "dev": "vite",
     "build": "vite build",
     "build:android": "vite build --base ./",
+    "test": "node --test",
     "preview": "vite preview",
     "android:add": "cap add android",
     "android:sync": "npm run build:android && cap sync android",

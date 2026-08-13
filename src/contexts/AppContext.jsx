@@ -1,37 +1,24 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react'
+import { makeId, makeTitle } from '../utils/text'
+import {
+  DEFAULT_SETTINGS,
+  makeChat,
+  normalizeChat,
+  normalizeCustomPrompts,
+  normalizeProviderProfiles,
+  normalizeSettings,
+} from '../utils/schema'
 
 const AppContext = createContext(null)
 
 const SETTINGS_KEY = 'omnichat-settings'
 const CHATS_KEY = 'omnichat-chats'
 const ACTIVE_CHAT_KEY = 'omnichat-active-chat'
+const FAVORITES_KEY = 'omnichat-favorite-models'
+const CUSTOM_PROMPTS_KEY = 'omnichat-custom-prompts'
+const PROVIDERS_KEY = 'omnichat-provider-profiles'
 
-export const defaultSettings = {
-  apiUrl: '',
-  apiKey: '',
-  systemPrompt: 'You are a helpful, accurate, and concise assistant.',
-  temperature: 0.7,
-  voice: 'alloy',
-  imageSize: '1024x1024',
-}
-
-const typeMatchers = {
-  image: ['dall', 'image', 'img', 'flux', 'stable', 'midjourney', 'pic'],
-  audio: ['whisper', 'tts', 'audio', 'speech', 'voice', 'sound'],
-  video: ['video', 'sora', 'runway', 'luma', 'animate'],
-}
-
-export function detectModelType(name = '') {
-  const normalized = name.toLowerCase()
-  for (const [type, words] of Object.entries(typeMatchers)) {
-    if (words.some((word) => normalized.includes(word))) return type
-  }
-  return 'text'
-}
-
-export function detectTextDirection(value = '') {
-  return /[\u0600-\u06ff\u0750-\u077f\u08a0-\u08ff]/.test(value) ? 'rtl' : 'ltr'
-}
+export const defaultSettings = DEFAULT_SETTINGS
 
 function readStorage(key, fallback) {
   try {
@@ -52,73 +39,6 @@ function writeStorage(key, value) {
   }
 }
 
-function makeChat(initial = {}) {
-  return {
-    id: makeId(),
-    title: 'New conversation',
-    model: '',
-    modelType: 'text',
-    messages: [],
-    createdAt: Date.now(),
-    updatedAt: Date.now(),
-    ...initial,
-  }
-}
-
-export function makeId() {
-  return globalThis.crypto?.randomUUID?.() ||
-    `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`
-}
-
-function normalizeSettings(value) {
-  const source = value && typeof value === 'object' ? value : {}
-  const temperature = Number(source.temperature)
-  return {
-    ...defaultSettings,
-    apiUrl: typeof source.apiUrl === 'string' ? source.apiUrl : '',
-    apiKey: typeof source.apiKey === 'string' ? source.apiKey : '',
-    systemPrompt:
-      typeof source.systemPrompt === 'string'
-        ? source.systemPrompt
-        : defaultSettings.systemPrompt,
-    temperature: Number.isFinite(temperature)
-      ? Math.min(2, Math.max(0, temperature))
-      : defaultSettings.temperature,
-    voice: typeof source.voice === 'string' ? source.voice : defaultSettings.voice,
-    imageSize:
-      typeof source.imageSize === 'string' ? source.imageSize : defaultSettings.imageSize,
-  }
-}
-
-function normalizeMessage(message) {
-  if (!message || typeof message !== 'object') return null
-  return {
-    ...message,
-    id: typeof message.id === 'string' ? message.id : makeId(),
-    role: message.role === 'user' ? 'user' : 'assistant',
-    content: typeof message.content === 'string' ? message.content : '',
-    prompt: typeof message.prompt === 'string' ? message.prompt : '',
-    url: typeof message.url === 'string' ? message.url : '',
-  }
-}
-
-function normalizeChat(chat) {
-  if (!chat || typeof chat !== 'object') return null
-  return {
-    ...makeChat(),
-    ...chat,
-    id: typeof chat.id === 'string' ? chat.id : makeId(),
-    title: typeof chat.title === 'string' ? chat.title : 'Imported conversation',
-    model: typeof chat.model === 'string' ? chat.model : '',
-    modelType: ['text', 'image', 'audio', 'video'].includes(chat.modelType)
-      ? chat.modelType
-      : detectModelType(chat.model),
-    messages: Array.isArray(chat.messages)
-      ? chat.messages.map(normalizeMessage).filter(Boolean)
-      : [],
-  }
-}
-
 export function AppProvider({ children }) {
   const [settings, setSettings] = useState(() =>
     normalizeSettings(readStorage(SETTINGS_KEY, defaultSettings)),
@@ -129,7 +49,15 @@ export function AppProvider({ children }) {
   })
   const [activeChatId, setActiveChatId] = useState(() => readStorage(ACTIVE_CHAT_KEY, null))
   const [models, setModels] = useState([])
+  const [favoriteModels, setFavoriteModels] = useState(() => readStorage(FAVORITES_KEY, []))
+  const [customPrompts, setCustomPrompts] = useState(() =>
+    normalizeCustomPrompts(readStorage(CUSTOM_PROMPTS_KEY, [])),
+  )
+  const [providerProfiles, setProviderProfiles] = useState(() =>
+    normalizeProviderProfiles(readStorage(PROVIDERS_KEY, [])),
+  )
   const [view, setView] = useState('chat')
+  const [draft, setDraft] = useState('')
   const [storageWarning, setStorageWarning] = useState('')
   const chatsRef = useRef(chats)
   chatsRef.current = chats
@@ -152,6 +80,18 @@ export function AppProvider({ children }) {
   useEffect(() => {
     writeStorage(ACTIVE_CHAT_KEY, activeChatId)
   }, [activeChatId])
+
+  useEffect(() => {
+    writeStorage(FAVORITES_KEY, favoriteModels)
+  }, [favoriteModels])
+
+  useEffect(() => {
+    writeStorage(CUSTOM_PROMPTS_KEY, customPrompts)
+  }, [customPrompts])
+
+  useEffect(() => {
+    writeStorage(PROVIDERS_KEY, providerProfiles)
+  }, [providerProfiles])
 
   useEffect(() => {
     const flushChats = () => writeStorage(CHATS_KEY, chatsRef.current)
@@ -194,7 +134,7 @@ export function AppProvider({ children }) {
         if (chat.id !== chatId) return chat
         const title =
           chat.messages.length === 0 && message.role === 'user'
-            ? message.content.trim().slice(0, 42) || 'New conversation'
+            ? makeTitle(message.content)
             : chat.title
         return {
           ...chat,
@@ -236,22 +176,110 @@ export function AppProvider({ children }) {
     )
   }, [])
 
+  const duplicateChat = useCallback((id) => {
+    const source = chatsRef.current.find((chat) => chat.id === id)
+    if (!source) return null
+    const copy = normalizeChat({
+      ...source,
+      id: makeId(),
+      title: `${source.title} (copy)`,
+      pinned: false,
+      archived: false,
+      createdAt: Date.now(),
+      updatedAt: Date.now(),
+      messages: source.messages.map((message) => ({ ...message, id: makeId() })),
+    })
+    setChats((current) => [copy, ...current])
+    setActiveChatId(copy.id)
+    setView('chat')
+    return copy.id
+  }, [])
+
   const clearChats = useCallback(() => {
     setChats([])
     setActiveChatId(null)
   }, [])
 
+  const toggleFavoriteModel = useCallback((modelId) => {
+    setFavoriteModels((current) =>
+      current.includes(modelId)
+        ? current.filter((item) => item !== modelId)
+        : [modelId, ...current],
+    )
+  }, [])
+
+  const addCustomPrompt = useCallback((prompt) => {
+    const item = {
+      id: makeId(),
+      category: prompt.category?.trim() || 'Custom',
+      title: prompt.title?.trim() || 'Untitled prompt',
+      description: prompt.description?.trim() || '',
+      prompt: prompt.prompt?.trim() || '',
+      custom: true,
+      createdAt: Date.now(),
+    }
+    if (!item.prompt) throw new Error('Prompt text is required.')
+    setCustomPrompts((current) => [item, ...current])
+    return item
+  }, [])
+
+  const deleteCustomPrompt = useCallback((id) => {
+    setCustomPrompts((current) => current.filter((item) => item.id !== id))
+  }, [])
+
+  const saveProviderProfile = useCallback((profile) => {
+    const item = {
+      id: profile.id || makeId(),
+      name: profile.name?.trim() || 'API provider',
+      apiUrl: profile.apiUrl?.trim() || '',
+      apiKey: profile.apiKey?.trim() || '',
+      createdAt: profile.createdAt || Date.now(),
+      updatedAt: Date.now(),
+    }
+    if (!item.apiUrl) throw new Error('Provider URL is required.')
+    setProviderProfiles((current) => {
+      const exists = current.some((provider) => provider.id === item.id)
+      return exists
+        ? current.map((provider) => (provider.id === item.id ? item : provider))
+        : [item, ...current]
+    })
+    return item
+  }, [])
+
+  const deleteProviderProfile = useCallback((id) => {
+    setProviderProfiles((current) => current.filter((provider) => provider.id !== id))
+  }, [])
+
+  const activateProviderProfile = useCallback((id) => {
+    const profile = providerProfiles.find((provider) => provider.id === id)
+    if (!profile) return
+    setSettings((current) => ({
+      ...current,
+      apiUrl: profile.apiUrl,
+      apiKey: profile.apiKey,
+      activeProviderId: profile.id,
+    }))
+    setModels([])
+  }, [providerProfiles])
+
   const importData = useCallback((payload) => {
     if (!payload || typeof payload !== 'object') throw new Error('Invalid backup file.')
-    const hasChats = Array.isArray(payload.chats)
+    const isSingleChat = Array.isArray(payload.messages)
+    const hasChats = Array.isArray(payload.chats) || isSingleChat
     const importedChats = hasChats
-      ? payload.chats.map(normalizeChat).filter(Boolean)
+      ? (isSingleChat ? [payload] : payload.chats).map(normalizeChat).filter(Boolean)
       : []
     if (!hasChats && !payload.settings) {
       throw new Error('No OmniChat data was found in this file.')
     }
     if (payload.settings && typeof payload.settings === 'object') {
       setSettings(normalizeSettings(payload.settings))
+    }
+    if (Array.isArray(payload.providerProfiles)) {
+      setProviderProfiles(normalizeProviderProfiles(payload.providerProfiles))
+    }
+    if (Array.isArray(payload.customPrompts)) {
+      setCustomPrompts(normalizeCustomPrompts(payload.customPrompts))
     }
     if (hasChats) {
       setChats(importedChats)
@@ -273,12 +301,24 @@ export function AppProvider({ children }) {
       addMessage,
       updateMessage,
       deleteMessage,
+      duplicateChat,
       clearChats,
       importData,
       models,
       setModels,
+      favoriteModels,
+      toggleFavoriteModel,
+      customPrompts,
+      addCustomPrompt,
+      deleteCustomPrompt,
+      providerProfiles,
+      saveProviderProfile,
+      deleteProviderProfile,
+      activateProviderProfile,
       view,
       setView,
+      draft,
+      setDraft,
       storageWarning,
       setStorageWarning,
     }),
@@ -293,10 +333,21 @@ export function AppProvider({ children }) {
       addMessage,
       updateMessage,
       deleteMessage,
+      duplicateChat,
       clearChats,
       importData,
       models,
+      favoriteModels,
+      toggleFavoriteModel,
+      customPrompts,
+      addCustomPrompt,
+      deleteCustomPrompt,
+      providerProfiles,
+      saveProviderProfile,
+      deleteProviderProfile,
+      activateProviderProfile,
       view,
+      draft,
       storageWarning,
     ],
   )

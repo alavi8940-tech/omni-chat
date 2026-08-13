@@ -10,10 +10,12 @@ import {
   ShieldCheck,
   Trash2,
   Upload,
+  Plus,
   XCircle,
 } from 'lucide-react'
 import { defaultSettings, useApp } from '../contexts/AppContext'
 import { cleanApiUrl, useApi } from '../hooks/useApi'
+import SystemDiagnostics from './SystemDiagnostics'
 
 const voices = ['alloy', 'ash', 'ballad', 'coral', 'echo', 'fable', 'nova', 'onyx', 'sage', 'shimmer']
 const imageSizes = ['1024x1024', '1792x1024', '1024x1792']
@@ -26,6 +28,11 @@ function Settings() {
     clearChats,
     importData,
     setModels,
+    providerProfiles,
+    saveProviderProfile,
+    deleteProviderProfile,
+    activateProviderProfile,
+    customPrompts,
   } = useApp()
   const { testConnection } = useApi()
   const [form, setForm] = useState(settings)
@@ -34,6 +41,7 @@ function Settings() {
   const [result, setResult] = useState(null)
   const [saved, setSaved] = useState(false)
   const [includeKey, setIncludeKey] = useState(false)
+  const [profileName, setProfileName] = useState('')
   const importRef = useRef(null)
   const testAbortRef = useRef(null)
 
@@ -57,6 +65,9 @@ function Settings() {
     temperature: Number.isFinite(Number(form.temperature))
       ? Math.min(2, Math.max(0, Number(form.temperature)))
       : defaultSettings.temperature,
+    maxContextMessages: Number.isFinite(Number(form.maxContextMessages))
+      ? Math.min(200, Math.max(2, Number(form.maxContextMessages)))
+      : defaultSettings.maxContextMessages,
   })
 
   const save = (event) => {
@@ -101,6 +112,11 @@ function Settings() {
       exportedAt: new Date().toISOString(),
       settings: safeSettings,
       chats,
+      providerProfiles: providerProfiles.map((profile) => ({
+        ...profile,
+        apiKey: includeKey ? profile.apiKey : '',
+      })),
+      customPrompts,
     }
     const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' })
     const url = URL.createObjectURL(blob)
@@ -131,6 +147,22 @@ function Settings() {
     if (window.confirm('Delete every conversation on this device? This cannot be undone.')) {
       clearChats()
       setResult({ ok: true, message: 'All conversations were deleted.' })
+    }
+  }
+
+  const saveProfile = () => {
+    try {
+      const profile = saveProviderProfile({
+        name: profileName || 'API provider',
+        apiUrl: cleanApiUrl(form.apiUrl),
+        apiKey: form.apiKey,
+      })
+      updateField('activeProviderId', profile.id)
+      setSettings({ ...normalizedSettings(), activeProviderId: profile.id })
+      setProfileName('')
+      setResult({ ok: true, message: `Saved provider profile “${profile.name}”.` })
+    } catch (error) {
+      setResult({ ok: false, message: error.message })
     }
   }
 
@@ -202,6 +234,62 @@ function Settings() {
           <section className="settings-card">
             <div className="card-heading compact">
               <div>
+                <h2>Interface language</h2>
+                <p>Switch core navigation and chat controls between English and Persian.</p>
+              </div>
+            </div>
+            <div className="language-options">
+              <button type="button" className={form.language === 'en' ? 'active' : ''} onClick={() => updateField('language', 'en')}>English</button>
+              <button type="button" className={form.language === 'fa' ? 'active' : ''} onClick={() => updateField('language', 'fa')}>فارسی</button>
+            </div>
+          </section>
+
+          <section className="settings-card">
+            <div className="card-heading compact">
+              <div>
+                <h2>Provider profiles</h2>
+                <p>Switch between cloud gateways, local servers, and team endpoints.</p>
+              </div>
+            </div>
+            <div className="profile-save-row">
+              <input value={profileName} onChange={(event) => setProfileName(event.target.value)} placeholder="Profile name, e.g. Local Ollama" />
+              <button className="secondary-button" type="button" onClick={saveProfile}>
+                <Plus size={16} /> Save current
+              </button>
+            </div>
+            <div className="provider-list">
+              {providerProfiles.map((profile) => (
+                <article className={`provider-item ${settings.activeProviderId === profile.id ? 'active' : ''}`} key={profile.id}>
+                  <button
+                    type="button"
+                    className="provider-main"
+                    onClick={() => {
+                      activateProviderProfile(profile.id)
+                      setForm((current) => ({ ...current, apiUrl: profile.apiUrl, apiKey: profile.apiKey, activeProviderId: profile.id }))
+                    }}
+                  >
+                    <span>{profile.name}</span>
+                    <small>{profile.apiUrl}</small>
+                  </button>
+                  <button
+                    className="message-action danger"
+                    type="button"
+                    onClick={() => {
+                      if (window.confirm(`Delete provider profile “${profile.name}”?`)) deleteProviderProfile(profile.id)
+                    }}
+                    aria-label={`Delete ${profile.name}`}
+                  >
+                    <Trash2 size={14} />
+                  </button>
+                </article>
+              ))}
+              {!providerProfiles.length && <p className="empty-list">No saved provider profiles.</p>}
+            </div>
+          </section>
+
+          <section className="settings-card">
+            <div className="card-heading compact">
+              <div>
                 <h2>Generation defaults</h2>
                 <p>These options apply to new requests.</p>
               </div>
@@ -244,6 +332,18 @@ function Settings() {
                 <select value={form.imageSize} onChange={(event) => updateField('imageSize', event.target.value)}>
                   {imageSizes.map((size) => <option key={size}>{size}</option>)}
                 </select>
+              </label>
+
+              <label className="field">
+                <span>Context messages</span>
+                <input
+                  type="number"
+                  min="2"
+                  max="200"
+                  value={form.maxContextMessages}
+                  onChange={(event) => updateField('maxContextMessages', event.target.value)}
+                />
+                <small>Limits older messages sent with each text request.</small>
               </label>
             </div>
           </section>
@@ -308,6 +408,7 @@ function Settings() {
           <strong>Local-first by design</strong>
           <span>OmniChat has no analytics server and no account system. Browser storage can still be cleared by the OS, so export regular backups.</span>
         </div>
+        <SystemDiagnostics />
       </div>
     </section>
   )

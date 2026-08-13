@@ -1,6 +1,9 @@
 import { useMemo, useState } from 'react'
 import {
   MessageSquare,
+  Images,
+  BarChart3,
+  BookOpen,
   Pencil,
   Plus,
   Search,
@@ -9,6 +12,8 @@ import {
   X,
 } from 'lucide-react'
 import { useApp } from '../contexts/AppContext'
+import { useI18n } from '../i18n'
+import PwaInstall from './PwaInstall'
 
 function Sidebar({ open, onClose }) {
   const {
@@ -23,12 +28,15 @@ function Sidebar({ open, onClose }) {
     view,
   } = useApp()
   const [query, setQuery] = useState('')
+  const [scope, setScope] = useState('active')
+  const { t } = useI18n()
   const visibleChats = useMemo(() => {
     const normalized = query.trim().toLowerCase()
     return [...chats]
-      .sort((a, b) => b.updatedAt - a.updatedAt)
-      .filter((chat) => chat.title.toLowerCase().includes(normalized))
-  }, [chats, query])
+      .filter((chat) => (scope === 'archived' ? chat.archived : !chat.archived))
+      .sort((a, b) => Number(b.pinned) - Number(a.pinned) || b.updatedAt - a.updatedAt)
+      .filter((chat) => `${chat.title} ${chat.model} ${chat.tags.join(' ')}`.toLowerCase().includes(normalized))
+  }, [chats, query, scope])
 
   const openChat = (id) => {
     setActiveChatId(id)
@@ -73,20 +81,24 @@ function Sidebar({ open, onClose }) {
           }
         >
           <Plus size={18} />
-          New chat
+          {t('newChat')}
         </button>
 
         {chats.length > 4 && (
           <label className="sidebar-search">
             <Search size={15} />
-            <input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search chats" />
+            <input value={query} onChange={(event) => setQuery(event.target.value)} placeholder={t('searchChats')} />
           </label>
         )}
 
-        <div className="sidebar-label">Conversations <span>{chats.length}</span></div>
+        <div className="sidebar-scopes">
+          <button type="button" className={scope === 'active' ? 'active' : ''} onClick={() => setScope('active')}>{t('active')}</button>
+          <button type="button" className={scope === 'archived' ? 'active' : ''} onClick={() => setScope('archived')}>{t('archived')}</button>
+        </div>
+        <div className="sidebar-label">{t('conversations')} <span>{visibleChats.length}</span></div>
         <nav className="chat-list" aria-label="Chat history">
           {visibleChats.length === 0 && (
-            <p className="empty-list">{chats.length ? 'No matching conversations.' : 'Your chats will appear here.'}</p>
+            <p className="empty-list">{chats.length ? t('noMatches') : t('noChats')}</p>
           )}
           {visibleChats.map((chat) => (
             <div
@@ -96,8 +108,8 @@ function Sidebar({ open, onClose }) {
               <button type="button" className="chat-select" onClick={() => openChat(chat.id)}>
                 <MessageSquare size={16} />
                 <span>
-                  <strong>{chat.title}</strong>
-                  <small>{chat.model || 'No model selected'}</small>
+                  <strong>{chat.pinned && '● '}{chat.title}</strong>
+                  <small>{chat.model || t('noModel')}</small>
                 </span>
               </button>
               <div className="chat-item-actions">
@@ -122,6 +134,40 @@ function Sidebar({ open, onClose }) {
           ))}
         </nav>
 
+        <PwaInstall />
+        <button
+          className={`settings-link ${view === 'prompts' ? 'active' : ''}`}
+          type="button"
+          onClick={() => {
+            setView('prompts')
+            onClose()
+          }}
+        >
+          <BookOpen size={18} />
+          {t('promptLibrary')}
+        </button>
+        <button
+          className={`settings-link ${view === 'gallery' ? 'active' : ''}`}
+          type="button"
+          onClick={() => {
+            setView('gallery')
+            onClose()
+          }}
+        >
+          <Images size={18} />
+          Media gallery
+        </button>
+        <button
+          className={`settings-link ${view === 'insights' ? 'active' : ''}`}
+          type="button"
+          onClick={() => {
+            setView('insights')
+            onClose()
+          }}
+        >
+          <BarChart3 size={18} />
+          {t('insights')}
+        </button>
         <button
           className={`settings-link ${view === 'settings' ? 'active' : ''}`}
           type="button"
@@ -131,7 +177,7 @@ function Sidebar({ open, onClose }) {
           }}
         >
           <SettingsIcon size={18} />
-          Settings
+          {t('settings')}
         </button>
       </aside>
       {open && <button className="sidebar-backdrop" type="button" aria-label="Close menu" onClick={onClose} />}

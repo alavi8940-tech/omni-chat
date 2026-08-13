@@ -26,6 +26,7 @@ jobs:
         with:
           node-version: 22
       - run: npm install
+      - run: npm test
       - name: Build web app
         run: npm run build
         env:
@@ -70,6 +71,7 @@ jobs:
           distribution: temurin
           java-version: 17
       - run: npm install
+      - run: npm test
       - name: Build web assets for Capacitor
         run: npm run build:android
       - name: Create and sync Android project

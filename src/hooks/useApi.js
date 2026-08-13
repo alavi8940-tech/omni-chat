@@ -70,6 +70,16 @@ function toDataUrl(blob) {
   })
 }
 
+export function isSafeMediaUrl(value) {
+  if (typeof value !== 'string' || !value.trim()) return false
+  try {
+    const url = new URL(value, window.location.origin)
+    return ['http:', 'https:', 'data:', 'blob:'].includes(url.protocol)
+  } catch {
+    return false
+  }
+}
+
 function wait(ms, signal) {
   return new Promise((resolve, reject) => {
     let timer
@@ -107,7 +117,7 @@ function firstMedia(data, kind) {
     data?.b64_json ||
     data?.base64 ||
     data?.b64
-  if (url) return url
+  if (url) return isSafeMediaUrl(url) ? url : ''
   if (base64) {
     const mime = kind === 'image' ? 'image/png' : kind === 'video' ? 'video/mp4' : 'audio/mpeg'
     return `data:${mime};base64,${base64}`

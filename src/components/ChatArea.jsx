@@ -1,18 +1,23 @@
 import { useEffect, useRef, useState } from 'react'
 import {
   Bot,
+  ArrowDown,
   ChevronDown,
   Image,
   Mic2,
   Send,
   Sparkles,
   Square,
+  SlidersHorizontal,
   Video,
 } from 'lucide-react'
-import { detectTextDirection, makeId, useApp } from '../contexts/AppContext'
+import { useApp } from '../contexts/AppContext'
 import { useApi } from '../hooks/useApi'
+import { detectTextDirection, estimateTokens, makeId } from '../utils/text'
 import Message from './Message'
 import ModelSelector from './ModelSelector'
+import ChatInspector from './ChatInspector'
+import { useI18n } from '../i18n'
 
 const modeMeta = {
   text: { label: 'Text', icon: Bot, placeholder: 'Message your model...' },
@@ -35,6 +40,8 @@ function ChatArea() {
     setView,
     storageWarning,
     setStorageWarning,
+    draft,
+    setDraft,
   } = useApp()
   const api = useApi()
   const [prompt, setPrompt] = useState('')
@@ -43,9 +50,11 @@ function ChatArea() {
   const [modelOpen, setModelOpen] = useState(false)
   const [modelError, setModelError] = useState('')
   const [stickToBottom, setStickToBottom] = useState(true)
+  const [inspectorOpen, setInspectorOpen] = useState(false)
   const abortRef = useRef(null)
   const endRef = useRef(null)
   const textareaRef = useRef(null)
+  const { t } = useI18n()
 
   const mode = activeChat?.modelType || 'text'
   const meta = modeMeta[mode]
@@ -64,6 +73,13 @@ function ChatArea() {
     textarea.style.height = `${Math.min(textarea.scrollHeight, 130)}px`
   }, [prompt])
 
+  useEffect(() => {
+    if (!draft) return
+    setPrompt(draft)
+    setDraft('')
+    window.setTimeout(() => textareaRef.current?.focus(), 0)
+  }, [draft, setDraft])
+
   const loadModels = async (force = false) => {
     setModelError('')
     if (!settings.apiUrl) {
@@ -81,6 +97,7 @@ function ChatArea() {
       setModelOpen(true)
     } catch (error) {
       setModelError(error.message)
+      setModelOpen(true)
     } finally {
       setLoadingModels(false)
     }
@@ -109,7 +126,10 @@ function ChatArea() {
       prompt: content,
       createdAt: Date.now(),
     }
-    const previous = sourceChat.messages.filter((message) => message.status !== 'error')
+    const contextLimit = Math.max(2, Number(settings.maxContextMessages) || 40)
+    const previous = sourceChat.messages
+      .filter((message) => message.status !== 'error' && message.status !== 'cancelled')
+      .slice(-contextLimit)
     const history = [...previous, ...(appendUser ? [userMessage] : [])]
       .filter((message) => message.content && !message.mediaType)
       .map(({ role, content: messageContent }) => ({ role, content: messageContent }))
@@ -186,11 +206,28 @@ function ChatArea() {
     await runRequest(content)
   }
 
-  const retryMessage = (message) => {
+  const regenerateMessage = (message) => {
     const promptToRetry = message.prompt
     if (!promptToRetry || !activeChat) return
-    deleteMessage(activeChat.id, message.id)
-    runRequest(promptToRetry, activeChat, { appendUser: false })
+    const index = activeChat.messages.findIndex((item) => item.id === message.id)
+    if (index < 0) return
+    const branchedChat = { ...activeChat, messages: activeChat.messages.slice(0, index) }
+    updateChat(activeChat.id, { messages: branchedChat.messages })
+    runRequest(promptToRetry, branchedChat, { appendUser: false })
+  }
+
+  const editUserMessage = (message) => {
+    if (!activeChat) return
+    const nextContent = window.prompt('Edit message and regenerate from this point:', message.content)?.trim()
+    if (!nextContent || nextContent === message.content) return
+    const index = activeChat.messages.findIndex((item) => item.id === message.id)
+    if (index < 0) return
+    const messages = activeChat.messages
+      .slice(0, index + 1)
+      .map((item) => (item.id === message.id ? { ...item, content: nextContent } : item))
+    const branchedChat = { ...activeChat, messages }
+    updateChat(activeChat.id, { messages })
+    runRequest(nextContent, branchedChat, { appendUser: false })
   }
 
   const stopGeneration = () => abortRef.current?.abort()
@@ -223,9 +260,14 @@ function ChatArea() {
             </select>
           </label>
           <button className="model-trigger" type="button" onClick={() => loadModels()} disabled={loadingModels}>
-            <span>{loadingModels ? 'Loading models...' : activeChat?.model || 'Select model'}</span>
+          <span>{loadingModels ? t('loadingModels') : activeChat?.model || t('selectModel')}</span>
             <ChevronDown size={16} />
           </button>
+          {activeChat && (
+            <button className="header-tool-button icon-button" type="button" onClick={() => setInspectorOpen(true)} aria-label="Conversation details">
+              <SlidersHorizontal size={17} />
+            </button>
+          )}
         </div>
       </header>
 
@@ -254,18 +296,18 @@ function ChatArea() {
         {!activeChat || activeChat.messages.length === 0 ? (
           <div className="welcome">
             <div className="welcome-icon"><Sparkles size={29} /></div>
-            <span className="eyebrow">WELCOME TO OMNICHAT</span>
-            <h2>One app. Every medium.</h2>
-            <p>Chat, illustrate, narrate, and create video through any OpenAI-compatible provider.</p>
+            <span className="eyebrow">{t('welcomeEyebrow')}</span>
+            <h2>{t('welcomeTitle')}</h2>
+            <p>{t('welcomeText')}</p>
             <div className="mode-pills" aria-label="Supported modes">
               {Object.entries(modeMeta).map(([key, item]) => {
                 const Icon = item.icon
-                return <span key={key}><Icon size={13} />{item.label}</span>
+                return <span key={key}><Icon size={13} />{t(key)}</span>
               })}
             </div>
             {!activeChat?.model && (
               <button className="primary-button" type="button" onClick={() => loadModels()}>
-                Choose your model
+                {t('chooseModel')}
               </button>
             )}
           </div>
@@ -274,13 +316,31 @@ function ChatArea() {
             <Message
               message={message}
               key={message.id}
-              onRetry={!busy && message.status === 'error' ? () => retryMessage(message) : null}
+              onRetry={
+                !busy && message.role === 'assistant' && message.status !== 'loading'
+                  ? () => regenerateMessage(message)
+                  : null
+              }
+              onEdit={!busy && message.role === 'user' ? () => editUserMessage(message) : null}
               onDelete={!busy ? () => deleteMessage(activeChat.id, message.id) : null}
             />
           ))
         )}
         <div ref={endRef} />
       </div>
+      {!stickToBottom && (
+        <button
+          className="scroll-bottom-button"
+          type="button"
+          onClick={() => {
+            setStickToBottom(true)
+            endRef.current?.scrollIntoView({ behavior: 'smooth' })
+          }}
+          aria-label="Scroll to latest message"
+        >
+          <ArrowDown size={16} />
+        </button>
+      )}
 
       <form className="composer-wrap" onSubmit={submit}>
         <div className="composer">
@@ -309,7 +369,10 @@ function ChatArea() {
             </button>
           )}
         </div>
-        <p>Enter to send · Shift + Enter for a new line</p>
+        <div className="composer-meta">
+          <span>{t('sendHint')}</span>
+          <span>{estimateTokens(prompt).toLocaleString()} estimated tokens</span>
+        </div>
       </form>
 
       {modelOpen && (
@@ -325,6 +388,7 @@ function ChatArea() {
           onClose={() => setModelOpen(false)}
         />
       )}
+      {inspectorOpen && activeChat && <ChatInspector chat={activeChat} onClose={() => setInspectorOpen(false)} />}
     </section>
   )
 }

@@ -14,3 +14,11 @@ createRoot(document.getElementById('root')).render(
     </ErrorBoundary>
   </StrictMode>,
 )
+
+if (import.meta.env.PROD && 'serviceWorker' in navigator) {
+  window.addEventListener('load', () => {
+    navigator.serviceWorker.register(`${import.meta.env.BASE_URL}service-worker.js`).catch(() => {
+      // Offline support is optional; the app remains fully usable if registration is blocked.
+    })
+  })
+}

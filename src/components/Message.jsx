@@ -1,10 +1,10 @@
 import { useState } from 'react'
-import { Bot, Check, Copy, Download, RefreshCw, Trash2, User } from 'lucide-react'
+import { Bot, Check, Copy, Download, Pencil, RefreshCw, Trash2, User } from 'lucide-react'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
-import { detectTextDirection } from '../contexts/AppContext'
+import { detectTextDirection, formatRelativeTime } from '../utils/text'
 
-function Message({ message, onRetry, onDelete }) {
+function Message({ message, onRetry, onEdit, onDelete }) {
   const isUser = message.role === 'user'
   const [copied, setCopied] = useState(false)
   const direction = detectTextDirection(message.content || message.prompt)
@@ -27,7 +27,10 @@ function Message({ message, onRetry, onDelete }) {
       </div>
       <div className="message-body">
         <div className="message-meta">
-          <div className="message-role">{isUser ? 'You' : 'OmniChat'}</div>
+          <div className="message-role">
+            {isUser ? 'You' : 'OmniChat'}
+            {message.createdAt && <time dateTime={new Date(message.createdAt).toISOString()}>{formatRelativeTime(message.createdAt)}</time>}
+          </div>
           <div className="message-actions">
             {message.content && (
               <button type="button" className="message-action" onClick={copyMessage} aria-label="Copy message">
@@ -49,6 +52,11 @@ function Message({ message, onRetry, onDelete }) {
             {message.status === 'error' && onRetry && (
               <button type="button" className="message-action" onClick={onRetry} aria-label="Retry request">
                 <RefreshCw size={14} />
+              </button>
+            )}
+            {onEdit && (
+              <button type="button" className="message-action" onClick={onEdit} aria-label="Edit and continue from this message">
+                <Pencil size={14} />
               </button>
             )}
             {onDelete && (
